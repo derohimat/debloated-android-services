@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Outer Shield Contour -->
+    <path
+        android:pathData="M54,24 L78,33 C78,57 68,73 54,82 C40,73 30,57 30,33 Z"
+        android:strokeColor="#06B6D4"
+        android:strokeWidth="3.5"
+        android:fillColor="#1006B6D4"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+
+    <!-- Performance Lightning Bolt -->
+    <path
+        android:pathData="M56,36 L43,53 L52,53 L48,70 L65,50 L56,50 Z"
+        android:fillColor="#10B981" />
+</vector>

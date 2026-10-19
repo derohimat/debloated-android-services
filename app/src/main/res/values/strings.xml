@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">DebloatMaster</string>
+    <string name="tab_checklist">Checklist</string>
+    <string name="tab_terminal">ADB &amp; Actions</string>
+    <string name="tab_backup">Backup &amp; Restore</string>
+    <string name="tab_logs">Audit Logs</string>
+    <string name="tab_device">Device &amp; Info</string>
+</resources>

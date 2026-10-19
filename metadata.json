@@ -1,0 +1,6 @@
+{
+  "name": "DebloatMaster",
+  "description": "Power-user Android debloat checklist, safe system app manager, ADB script generator, and secure backup restoration system.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
