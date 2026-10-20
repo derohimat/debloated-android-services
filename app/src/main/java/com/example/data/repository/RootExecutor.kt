@@ -34,6 +34,15 @@ object RootExecutor {
     }
 
     suspend fun executeCommand(command: String, asRoot: Boolean = true): CommandResult = withContext(Dispatchers.IO) {
+        if (!com.example.data.security.PackageSecurityValidator.isSafeCommand(command)) {
+            return@withContext CommandResult(
+                command = command,
+                isSuccess = false,
+                output = "",
+                error = "Security Policy Blocked: Refusing to execute unauthorized or unvalidated shell command.",
+                exitCode = -1
+            )
+        }
         val shellCmd = if (asRoot) arrayOf("su", "-c", command) else arrayOf("sh", "-c", command)
         try {
             val process = Runtime.getRuntime().exec(shellCmd)

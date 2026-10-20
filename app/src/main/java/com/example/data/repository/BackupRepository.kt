@@ -75,13 +75,24 @@ class BackupRepository(private val context: Context) {
     suspend fun importSnapshotJson(jsonStr: String): DebloatSnapshot? = withContext(Dispatchers.IO) {
         try {
             val imported = singleAdapter.fromJson(jsonStr) ?: return@withContext null
-            val currentList = getSnapshots().toMutableList()
-            // Avoid duplicate ID
-            val safeImported = if (currentList.any { it.id == imported.id }) {
-                imported.copy(id = UUID.randomUUID().toString(), name = "${imported.name} (Imported)")
-            } else {
-                imported
+            // Security: filter and validate all package records
+            val validRecords = imported.packageRecords.filter {
+                com.example.data.security.PackageSecurityValidator.isValidPackageName(it.packageName)
             }
+            val sanitizedName = com.example.data.security.PackageSecurityValidator.sanitizeText(imported.name, maxLength = 64)
+            val sanitizedNotes = com.example.data.security.PackageSecurityValidator.sanitizeText(imported.notes, maxLength = 256)
+            val sanitizedModel = com.example.data.security.PackageSecurityValidator.sanitizeText(imported.deviceModel, maxLength = 48)
+
+            val currentList = getSnapshots().toMutableList()
+            val safeImported = imported.copy(
+                id = UUID.randomUUID().toString(),
+                name = if (sanitizedName.isNotBlank()) "$sanitizedName (Imported)" else "Imported Snapshot #${System.currentTimeMillis() % 10000}",
+                deviceModel = sanitizedModel.ifBlank { "Unknown Device" },
+                notes = sanitizedNotes,
+                packageRecords = validRecords,
+                totalCaptured = validRecords.size,
+                disabledCount = validRecords.count { !it.isEnabled }
+            )
             currentList.add(0, safeImported)
             saveSnapshots(currentList)
             safeImported
@@ -91,21 +102,28 @@ class BackupRepository(private val context: Context) {
     }
 
     fun generateRestoreScript(snapshot: DebloatSnapshot): String {
+        val safeName = com.example.data.security.PackageSecurityValidator.sanitizeText(snapshot.name, 64)
+        val safeModel = com.example.data.security.PackageSecurityValidator.sanitizeText(snapshot.deviceModel, 48)
+        val safeVersion = com.example.data.security.PackageSecurityValidator.sanitizeText(snapshot.androidVersion, 24)
+
         val sb = StringBuilder()
         sb.append("#!/bin/bash\n")
         sb.append("# ==================================================================\n")
         sb.append("# DebloatMaster System Restoration Script\n")
-        sb.append("# Snapshot: ${snapshot.name}\n")
-        sb.append("# Target Device: ${snapshot.deviceModel} (Android ${snapshot.androidVersion})\n")
+        sb.append("# Snapshot: $safeName\n")
+        sb.append("# Target Device: $safeModel (Android $safeVersion)\n")
         sb.append("# Created: ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).format(snapshot.createdAt)}\n")
-        sb.append("# Total Packages Restored: ${snapshot.packageRecords.count { it.isEnabled }}\n")
+        sb.append("# Total Packages Restored: ${snapshot.packageRecords.count { it.isEnabled && com.example.data.security.PackageSecurityValidator.isValidPackageName(it.packageName) }}\n")
         sb.append("# ==================================================================\n\n")
         sb.append("echo \"[*] Starting DebloatMaster restoration...\"\n\n")
 
-        val enabledInSnapshot = snapshot.packageRecords.filter { it.isEnabled }
+        val enabledInSnapshot = snapshot.packageRecords.filter { 
+            it.isEnabled && com.example.data.security.PackageSecurityValidator.isValidPackageName(it.packageName) 
+        }
         for (pkg in enabledInSnapshot) {
-            sb.append("echo \"Restoring: ${pkg.packageName}\"\n")
-            sb.append("adb shell pm enable ${pkg.packageName} 2>/dev/null || adb shell cmd package install-existing ${pkg.packageName}\n")
+            val safePkg = pkg.packageName
+            sb.append("echo \"Restoring: $safePkg\"\n")
+            sb.append("adb shell pm enable $safePkg 2>/dev/null || adb shell cmd package install-existing $safePkg\n")
         }
 
         sb.append("\necho \"[+] Restoration commands sent successfully!\"\n")

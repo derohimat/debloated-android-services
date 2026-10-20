@@ -14,5 +14,23 @@
 .externalNativeBuild
 .cxx
 local.properties
+secrets.properties
+
+# Environment variables & secrets
 .env
+.env.*
+!.env.example
+
+# Android signing keys, certificates, and keystores
 debug.keystore
+debug.keystore.base64
+*.jks
+*.keystore
+my-upload-key.jks
+*.key
+*.pem
+*.p12
+*.pk8
+
+# Private build artifacts & outputs
+.build-outputs/

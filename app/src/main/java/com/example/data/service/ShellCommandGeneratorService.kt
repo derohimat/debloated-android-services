@@ -165,9 +165,14 @@ class ShellCommandGeneratorService(
         }
 
         val safeEntities = if (actionType != ShellActionType.RESTORE_APP) {
-            entities.filter { it.safetyLevel != SafetyLevel.ESSENTIAL }
+            entities.filter { 
+                it.safetyLevel != SafetyLevel.ESSENTIAL && 
+                com.example.data.security.PackageSecurityValidator.isValidPackageName(it.packageName) 
+            }
         } else {
-            entities
+            entities.filter { 
+                com.example.data.security.PackageSecurityValidator.isValidPackageName(it.packageName) 
+            }
         }
 
         val useAdbPrefix = targetFormat != ShellTargetFormat.LOCAL_SHELL
@@ -301,6 +306,15 @@ class ShellCommandGeneratorService(
         asRoot: Boolean = true,
         customExecutor: (suspend (String, Boolean) -> CommandResult)? = null
     ): CommandResult = withContext(Dispatchers.IO) {
+        if (!com.example.data.security.PackageSecurityValidator.isValidPackageName(packageName)) {
+            return@withContext CommandResult(
+                command = "",
+                isSuccess = false,
+                output = "",
+                error = "Security Policy Blocked: Invalid or malicious package name ($packageName).",
+                exitCode = -1
+            )
+        }
         val entity = systemAppDao.getAppByPackageName(packageName)
         if (entity?.safetyLevel == SafetyLevel.ESSENTIAL && actionType != ShellActionType.RESTORE_APP) {
             return@withContext CommandResult(

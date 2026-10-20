@@ -60,13 +60,16 @@ class AuditLogRepository(private val context: Context) {
         severity: LogSeverity = LogSeverity.INFO,
         commandExecuted: String? = null
     ) = withContext(Dispatchers.IO) {
+        val safeTag = com.example.data.security.PackageSecurityValidator.sanitizeText(tag, 32)
+        val safeMessage = com.example.data.security.PackageSecurityValidator.sanitizeText(message, 500)
+        val safeCommand = commandExecuted?.let { com.example.data.security.PackageSecurityValidator.sanitizeText(it, 250) }
         val entry = AuditLogEntry(
             id = UUID.randomUUID().toString(),
             timestamp = System.currentTimeMillis(),
-            tag = tag,
-            message = message,
+            tag = safeTag,
+            message = safeMessage,
             severity = severity,
-            commandExecuted = commandExecuted
+            commandExecuted = safeCommand
         )
 
         val updated = mutableListOf(entry).apply {

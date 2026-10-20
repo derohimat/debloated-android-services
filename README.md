@@ -127,6 +127,10 @@ Compiled APKs will be output to:
 
 ---
 
-## 🔒 Safety & Privacy Guarantee
-- **Zero Internet Permissions Required for Core Debloating**: DebloatMaster operates completely offline on your device.
-- **Non-Destructive**: Apps disabled with `pm disable-user --user 0` remain in the system partition and can be re-enabled at any time without a factory reset.
+## 🔒 Safety, Security & Privacy Architecture
+- **Zero Telemetry / Offline Guarantee**: DebloatMaster operates completely offline on your device with no analytical tracking, advertisements, or cloud telemetry.
+- **Strict Network Security**: Cleartext HTTP is disabled globally (`android:usesCleartextTraffic="false"`) with explicit CA pinning in `network_security_config.xml`.
+- **Command Injection Defense**: All package identifiers are validated against strict Android package naming specifications (`^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)+$`). Shell metacharacters and ANSI escape sequences are rejected before commands reach the shell or generated scripts.
+- **Bytecode Hardening**: Production release builds enforce Android R8 / ProGuard code minification, obfuscation, and stripping of sensitive debugging logs.
+- **Public Repository Security**: Private keys, keystores (`*.jks`, `*.keystore`), signing secrets, and `.env` files are excluded by default via `.gitignore`. See [`SECURITY.md`](./SECURITY.md) for full vulnerability reporting and security policies.
+- **Non-Destructive**: Apps disabled with `pm disable-user --user 0` remain safely in the system partition and can be re-enabled at any time without a factory reset.
