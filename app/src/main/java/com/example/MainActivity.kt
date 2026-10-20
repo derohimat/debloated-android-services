@@ -274,10 +274,18 @@ class MainActivity : ComponentActivity() {
 
                             1 -> TerminalActionScreen(
                                 state = state,
-                                onSetMethod = { viewModel.setDebloatMethod(it) },
+                                onSetActionType = { viewModel.setShellActionType(it) },
+                                onSetTargetFormat = { viewModel.setShellTargetFormat(it) },
                                 onCopyScript = { viewModel.copyScriptToClipboard() },
+                                onCopySingleLine = { viewModel.copySingleLineCommand() },
+                                onCopyIndividualCommand = { pkgName, cmd, label ->
+                                    viewModel.copyIndividualCommand(pkgName, cmd, label)
+                                },
                                 onShareScript = { viewModel.shareScript() },
-                                onExecuteRoot = { viewModel.executeRootDebloat() }
+                                onExecuteBatch = { viewModel.executeBatchShellCommands() },
+                                onExecuteSinglePackage = { pkgName, actionType ->
+                                    viewModel.executeSinglePackageShellCommand(pkgName, actionType)
+                                }
                             )
 
                             2 -> BackupRestoreScreen(
@@ -307,7 +315,10 @@ class MainActivity : ComponentActivity() {
                             packageItem = pkg,
                             onDismiss = { viewModel.showPackageDetails(null) },
                             onOpenAppSettings = { viewModel.openAppSettings(it) },
-                            onCopyCommand = { /* handled inside bottom sheet */ }
+                            onCopyCommand = { /* handled inside bottom sheet */ },
+                            onUpdateRiskLevel = { pkgName, level ->
+                                viewModel.updatePackageRiskLevel(pkgName, level)
+                            }
                         )
                     }
                 }

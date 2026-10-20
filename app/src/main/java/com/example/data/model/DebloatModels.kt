@@ -1,9 +1,25 @@
 package com.example.data.model
 
-enum class SafetyLevel(val label: String, val badgeColorHex: Long) {
-    SAFE("Safe to Disable", 0xFF10B981),
-    CAUTION("Caution / Optional", 0xFFF59E0B),
-    ESSENTIAL("Critical System", 0xFFEF4444)
+enum class SafetyLevel(
+    val label: String,
+    val badgeColorHex: Long,
+    val riskSummary: String
+) {
+    SAFE(
+        label = "Safe to remove",
+        badgeColorHex = 0xFF10B981,
+        riskSummary = "Verified bloatware or telemetry with zero impact on core OS stability."
+    ),
+    CAUTION(
+        label = "Caution",
+        badgeColorHex = 0xFFF59E0B,
+        riskSummary = "Optional system service; disabling may affect specific features."
+    ),
+    ESSENTIAL(
+        label = "Critical system",
+        badgeColorHex = 0xFFEF4444,
+        riskSummary = "Core Android framework component. Locked to prevent bootloops."
+    )
 }
 
 enum class BloatCategory(val displayName: String, val iconName: String) {

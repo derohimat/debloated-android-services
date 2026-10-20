@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -31,6 +30,8 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -76,7 +77,8 @@ fun PackageDetailsBottomSheet(
     packageItem: BloatPackage,
     onDismiss: () -> Unit,
     onOpenAppSettings: (String) -> Unit,
-    onCopyCommand: (String) -> Unit
+    onCopyCommand: (String) -> Unit,
+    onUpdateRiskLevel: (String, SafetyLevel) -> Unit = { _, _ -> }
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val clipboardManager = LocalClipboardManager.current
@@ -100,34 +102,10 @@ fun PackageDetailsBottomSheet(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    val (badgeBg, badgeText, badgeIcon) = when (packageItem.safetyLevel) {
-                        SafetyLevel.SAFE -> Triple(SafeGreenBg, SafeGreenText, Icons.Default.Security)
-                        SafetyLevel.CAUTION -> Triple(CautionAmberBg, CautionAmberText, Icons.Default.Warning)
-                        SafetyLevel.ESSENTIAL -> Triple(DangerRedBg, DangerRedText, Icons.Default.Shield)
-                    }
-
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(badgeBg)
-                            .padding(horizontal = 10.dp, vertical = 6.dp)
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = badgeIcon,
-                                contentDescription = null,
-                                tint = badgeText,
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = packageItem.safetyLevel.label.uppercase(),
-                                color = badgeText,
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
+                    RiskLevelChip(
+                        safetyLevel = packageItem.safetyLevel,
+                        compact = false
+                    )
                 }
 
                 IconButton(
@@ -206,6 +184,55 @@ fun PackageDetailsBottomSheet(
                     accent = if (packageItem.isEnabled) CyberCyan else CautionAmber,
                     modifier = Modifier.weight(1f)
                 )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Room Database Risk Level Classification Override
+            Text(
+                text = "ROOM DB RISK CLASSIFICATION",
+                style = MaterialTheme.typography.labelSmall,
+                color = TextSecondary,
+                letterSpacing = 1.sp
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                SafetyLevel.values().forEach { level ->
+                    val isSelected = packageItem.safetyLevel == level
+                    FilterChip(
+                        selected = isSelected,
+                        onClick = { onUpdateRiskLevel(packageItem.packageName, level) },
+                        label = {
+                            Text(
+                                text = level.label,
+                                fontSize = 10.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                maxLines = 1
+                            )
+                        },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = when (level) {
+                                SafetyLevel.SAFE -> SafeGreenBg
+                                SafetyLevel.CAUTION -> CautionAmberBg
+                                SafetyLevel.ESSENTIAL -> DangerRedBg
+                            },
+                            selectedLabelColor = when (level) {
+                                SafetyLevel.SAFE -> SafeGreenText
+                                SafetyLevel.CAUTION -> CautionAmberText
+                                SafetyLevel.ESSENTIAL -> DangerRedText
+                            },
+                            containerColor = Color(0xFF0F172A),
+                            labelColor = TextMuted
+                        ),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("risk_chip_${level.name.lowercase()}")
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(16.dp))

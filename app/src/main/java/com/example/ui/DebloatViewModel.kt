@@ -9,6 +9,7 @@ import android.net.Uri
 import android.provider.Settings
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.data.local.DebloatDatabase
 import com.example.data.model.AuditLogEntry
 import com.example.data.model.BloatCategory
 import com.example.data.model.BloatPackage
@@ -23,7 +24,10 @@ import com.example.data.repository.AuditLogRepository
 import com.example.data.repository.BackupRepository
 import com.example.data.repository.DeviceHardwareInfo
 import com.example.data.repository.DeviceScannerRepository
-import com.example.data.repository.RootExecutor
+import com.example.data.service.GeneratedCommandPayload
+import com.example.data.service.ShellActionType
+import com.example.data.service.ShellCommandGeneratorService
+import com.example.data.service.ShellTargetFormat
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -32,19 +36,6 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-
-enum class DebloatMethod(val label: String, val commandPrefix: String, val description: String) {
-    DISABLE_USER(
-        label = "Safe Disable (Recommended)",
-        commandPrefix = "pm disable-user --user 0",
-        description = "Freezes package for User 0. 100% reversible anytime without loss of data."
-    ),
-    UNINSTALL_USER(
-        label = "User Uninstall",
-        commandPrefix = "pm uninstall -k --user 0",
-        description = "Removes app from app drawer while retaining APK in /system for easy re-install."
-    )
-}
 
 data class DebloatUiState(
     val isLoading: Boolean = true,
@@ -57,7 +48,9 @@ data class DebloatUiState(
     val categoryFilter: BloatCategory? = null,
     val safetyFilter: SafetyLevel? = null,
     val onlyInstalled: Boolean = true,
-    val debloatMethod: DebloatMethod = DebloatMethod.DISABLE_USER,
+    val shellActionType: ShellActionType = ShellActionType.DISABLE_USER,
+    val shellTargetFormat: ShellTargetFormat = ShellTargetFormat.PC_ADB,
+    val commandPayload: GeneratedCommandPayload = GeneratedCommandPayload(),
     val activePreset: String? = null,
     val selectedPackageDetails: BloatPackage? = null,
     val snapshots: List<DebloatSnapshot> = emptyList(),
@@ -69,9 +62,15 @@ data class DebloatUiState(
 
 class DebloatViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val scannerRepo = DeviceScannerRepository(application)
+    private val database = DebloatDatabase.getInstance(application)
+    private val systemAppDao = database.systemAppDao()
+    private val scannerRepo = DeviceScannerRepository(application, systemAppDao)
     private val backupRepo = BackupRepository(application)
     private val auditRepo = AuditLogRepository(application)
+    val shellCommandService = ShellCommandGeneratorService(application, systemAppDao)
+
+    private val actionTypeFlow = MutableStateFlow(ShellActionType.DISABLE_USER)
+    private val targetFormatFlow = MutableStateFlow(ShellTargetFormat.PC_ADB)
 
     private val _uiState = MutableStateFlow(DebloatUiState())
     val uiState: StateFlow<DebloatUiState> = _uiState.asStateFlow()
@@ -83,6 +82,51 @@ class DebloatViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             auditRepo.initLogs()
             loadData()
+        }
+
+        // Observe Room Database system_applications table reactively
+        viewModelScope.launch {
+            scannerRepo.allSystemAppsFlow.collect { roomPackages ->
+                if (roomPackages.isNotEmpty()) {
+                    val selectedFromRoom = roomPackages
+                        .filter { it.isSelectedForDebloat && it.safetyLevel != SafetyLevel.ESSENTIAL }
+                        .map { it.packageName }
+                        .toSet()
+
+                    _uiState.update { current ->
+                        val updatedDetails = current.selectedPackageDetails?.let { openPkg ->
+                            roomPackages.firstOrNull { it.packageName == openPkg.packageName }
+                        }
+                        current.copy(
+                            packages = roomPackages,
+                            selectedPackageNames = selectedFromRoom,
+                            selectedPackageDetails = updatedDetails
+                        )
+                    }
+                    updatePerformanceMetrics()
+                }
+            }
+        }
+
+        // Observe reactive shell command generation from Room selections
+        viewModelScope.launch {
+            shellCommandService.observeCommandPayload(
+                actionTypeFlow = actionTypeFlow,
+                targetFormatFlow = targetFormatFlow
+            ).collect { payload ->
+                _uiState.update {
+                    it.copy(
+                        shellActionType = payload.actionType,
+                        shellTargetFormat = payload.targetFormat,
+                        commandPayload = payload,
+                        generatedScript = payload.formattedOutput
+                    )
+                }
+            }
+        }
+
+        // Observe audit logs
+        viewModelScope.launch {
             auditRepo.logsFlow.collect { logs ->
                 _uiState.update { it.copy(auditLogs = logs) }
             }
@@ -100,27 +144,28 @@ class DebloatViewModel(application: Application) : AndroidViewModel(application)
             val pkgs = scannerRepo.scanPackages()
             val snapshots = backupRepo.getSnapshots()
 
-            // Filter initial preset according to OEM
             val initialOemFilter = if (devInfo.detectedOem != DeviceManufacturer.ALL) {
                 devInfo.detectedOem
             } else {
                 DeviceManufacturer.ALL
             }
 
+            val selectedSet = pkgs.filter { it.isSelectedForDebloat }.map { it.packageName }.toSet()
+
             _uiState.update { state ->
                 state.copy(
                     isLoading = false,
                     hardwareInfo = devInfo,
                     packages = pkgs,
+                    selectedPackageNames = selectedSet,
                     manufacturerFilter = initialOemFilter,
                     snapshots = snapshots
                 )
             }
             updatePerformanceMetrics()
-            updateGeneratedScript()
             auditRepo.log(
-                tag = "SCAN_COMPLETE",
-                message = "Device scan completed. Found ${pkgs.size} candidate packages (${pkgs.count { it.isInstalled }} installed on device).",
+                tag = "ROOM_SYNC",
+                message = "Device scan & Room DB sync complete. Stored ${pkgs.size} system packages (${pkgs.count { it.isInstalled }} installed).",
                 severity = LogSeverity.INFO
             )
         }
@@ -146,9 +191,12 @@ class DebloatViewModel(application: Application) : AndroidViewModel(application)
         _uiState.update { it.copy(onlyInstalled = onlyInstalled) }
     }
 
-    fun setDebloatMethod(method: DebloatMethod) {
-        _uiState.update { it.copy(debloatMethod = method) }
-        updateGeneratedScript()
+    fun setShellActionType(actionType: ShellActionType) {
+        actionTypeFlow.value = actionType
+    }
+
+    fun setShellTargetFormat(targetFormat: ShellTargetFormat) {
+        targetFormatFlow.value = targetFormat
     }
 
     fun togglePackageSelection(pkgName: String) {
@@ -162,10 +210,11 @@ class DebloatViewModel(application: Application) : AndroidViewModel(application)
             return
         }
 
-        if (current.contains(pkgName)) {
-            current.remove(pkgName)
-        } else {
+        val willBeSelected = !current.contains(pkgName)
+        if (willBeSelected) {
             current.add(pkgName)
+        } else {
+            current.remove(pkgName)
         }
 
         _uiState.update {
@@ -175,7 +224,25 @@ class DebloatViewModel(application: Application) : AndroidViewModel(application)
             )
         }
         updatePerformanceMetrics()
-        updateGeneratedScript()
+
+        viewModelScope.launch {
+            scannerRepo.updateSelectionState(pkgName, willBeSelected)
+        }
+    }
+
+    fun updatePackageRiskLevel(packageName: String, newRiskLevel: SafetyLevel) {
+        viewModelScope.launch {
+            scannerRepo.updateAppRiskLevel(packageName, newRiskLevel)
+            if (newRiskLevel == SafetyLevel.ESSENTIAL) {
+                scannerRepo.updateSelectionState(packageName, false)
+            }
+            auditRepo.log(
+                tag = "RISK_UPDATED",
+                message = "Updated risk level of $packageName to ${newRiskLevel.label} in Room database.",
+                severity = LogSeverity.INFO
+            )
+            _snackBarEvent.emit("Updated $packageName risk level to ${newRiskLevel.label}")
+        }
     }
 
     fun applyPreset(presetName: String) {
@@ -183,13 +250,12 @@ class DebloatViewModel(application: Application) : AndroidViewModel(application)
         val presets = BloatwareCatalog.getRecommendedPresets()
         val targetList = presets[presetName] ?: return
 
-        // Filter packages that are installed and non-essential
         val selectedSet = state.packages
             .filter { pkg ->
                 targetList.contains(pkg.packageName) &&
-                        pkg.safetyLevel != SafetyLevel.ESSENTIAL &&
-                        (!state.onlyInstalled || pkg.isInstalled) &&
-                        pkg.isEnabled
+                    pkg.safetyLevel != SafetyLevel.ESSENTIAL &&
+                    (!state.onlyInstalled || pkg.isInstalled) &&
+                    pkg.isEnabled
             }
             .map { it.packageName }
             .toSet()
@@ -201,12 +267,12 @@ class DebloatViewModel(application: Application) : AndroidViewModel(application)
             )
         }
         updatePerformanceMetrics()
-        updateGeneratedScript()
 
         viewModelScope.launch {
+            scannerRepo.setSelectedPackages(selectedSet)
             auditRepo.log(
                 tag = "PRESET_APPLIED",
-                message = "Applied '$presetName' preset: selected ${selectedSet.size} packages.",
+                message = "Applied '$presetName' preset: persisted ${selectedSet.size} selections in Room DB.",
                 severity = LogSeverity.INFO
             )
             _snackBarEvent.emit("Selected ${selectedSet.size} packages via '$presetName'")
@@ -223,13 +289,19 @@ class DebloatViewModel(application: Application) : AndroidViewModel(application)
         }
         _uiState.update { it.copy(selectedPackageNames = updated, activePreset = null) }
         updatePerformanceMetrics()
-        updateGeneratedScript()
+
+        viewModelScope.launch {
+            scannerRepo.setSelectedPackages(updated)
+        }
     }
 
     fun clearSelection() {
         _uiState.update { it.copy(selectedPackageNames = emptySet(), activePreset = null) }
         updatePerformanceMetrics()
-        updateGeneratedScript()
+
+        viewModelScope.launch {
+            scannerRepo.clearAllSelections()
+        }
     }
 
     fun showPackageDetails(pkg: BloatPackage?) {
@@ -242,7 +314,9 @@ class DebloatViewModel(application: Application) : AndroidViewModel(application)
         val count = selectedPkgs.size
         val ramFreed = selectedPkgs.sumOf { it.ramSavingMb }
         val wakelocks = (count * 1.8).toInt()
-        val privacyBoost = (selectedPkgs.count { it.category == BloatCategory.TELEMETRY || it.category == BloatCategory.SOCIAL_PRELOAD } * 12).coerceAtMost(98)
+        val privacyBoost = (selectedPkgs.count {
+            it.category == BloatCategory.TELEMETRY || it.category == BloatCategory.SOCIAL_PRELOAD
+        } * 12).coerceAtMost(98)
 
         _uiState.update {
             it.copy(
@@ -256,57 +330,63 @@ class DebloatViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    private fun updateGeneratedScript() {
-        val state = _uiState.value
-        val selected = state.packages.filter { state.selectedPackageNames.contains(it.packageName) }
-        val method = state.debloatMethod
-
-        val sb = StringBuilder()
-        sb.append("#!/bin/bash\n")
-        sb.append("# =========================================================\n")
-        sb.append("# DebloatMaster Batch Debloat Script\n")
-        sb.append("# Mode: ${method.label}\n")
-        sb.append("# Target Packages: ${selected.size}\n")
-        sb.append("# =========================================================\n\n")
-
-        if (selected.isEmpty()) {
-            sb.append("# No packages currently selected in checklist.\n")
-            sb.append("# Select packages or apply a preset to generate script.\n")
-        } else {
-            sb.append("echo \"[*] Starting DebloatMaster operation on ${selected.size} packages...\"\n\n")
-            for (pkg in selected) {
-                sb.append("# [${pkg.displayName}] (${pkg.category.displayName})\n")
-                sb.append("adb shell ${method.commandPrefix} ${pkg.packageName}\n\n")
-            }
-            sb.append("echo \"[+] Debloat script execution completed.\"\n")
-            sb.append("echo \"[+] Run 'adb reboot' or restart your device for changes to take full effect.\"\n")
-        }
-
-        _uiState.update { it.copy(generatedScript = sb.toString()) }
-    }
-
     fun copyScriptToClipboard() {
-        val context = getApplication<Application>()
-        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        val clip = ClipData.newPlainText("Debloat Script", _uiState.value.generatedScript)
-        clipboard.setPrimaryClip(clip)
+        val payload = _uiState.value.commandPayload
+        shellCommandService.copyCommandToClipboard(
+            commandText = payload.formattedOutput,
+            label = "DebloatMaster ${payload.actionType.label}"
+        )
 
         viewModelScope.launch {
             auditRepo.log(
                 tag = "ADB_COPY",
-                message = "Copied ADB script for ${_uiState.value.selectedPackageNames.size} packages to clipboard.",
-                severity = LogSeverity.SUCCESS
+                message = "Copied ${payload.actionType.label} commands (${payload.targetCount} apps from Room DB) to clipboard.",
+                severity = LogSeverity.SUCCESS,
+                commandExecuted = payload.packageCommands.firstOrNull()?.activeCommand
             )
-            _snackBarEvent.emit("ADB commands copied to clipboard!")
+            _snackBarEvent.emit("Copied ${payload.targetCount} ${payload.actionType.label} command(s) to clipboard!")
+        }
+    }
+
+    fun copySingleLineCommand() {
+        val payload = _uiState.value.commandPayload
+        if (payload.singleLineCommand.isBlank()) return
+        shellCommandService.copyCommandToClipboard(
+            commandText = payload.singleLineCommand,
+            label = "DebloatMaster Chained Command"
+        )
+
+        viewModelScope.launch {
+            auditRepo.log(
+                tag = "CHAIN_COPY",
+                message = "Copied chained one-liner for ${payload.targetCount} apps to clipboard.",
+                severity = LogSeverity.SUCCESS,
+                commandExecuted = payload.singleLineCommand.take(120)
+            )
+            _snackBarEvent.emit("Chained one-line command copied!")
+        }
+    }
+
+    fun copyIndividualCommand(packageName: String, commandText: String, actionLabel: String) {
+        shellCommandService.copyCommandToClipboard(commandText, "Command for $packageName")
+        viewModelScope.launch {
+            auditRepo.log(
+                tag = "CMD_COPY",
+                message = "Copied $actionLabel command for $packageName.",
+                severity = LogSeverity.INFO,
+                commandExecuted = commandText
+            )
+            _snackBarEvent.emit("Copied $actionLabel command for $packageName")
         }
     }
 
     fun shareScript() {
         val context = getApplication<Application>()
+        val payload = _uiState.value.commandPayload
         val intent = Intent(Intent.ACTION_SEND).apply {
             type = "text/plain"
-            putExtra(Intent.EXTRA_SUBJECT, "DebloatMaster Script (${_uiState.value.selectedPackageNames.size} packages)")
-            putExtra(Intent.EXTRA_TEXT, _uiState.value.generatedScript)
+            putExtra(Intent.EXTRA_SUBJECT, "DebloatMaster ${payload.actionType.label} (${payload.targetCount} packages)")
+            putExtra(Intent.EXTRA_TEXT, payload.formattedOutput)
             flags = Intent.FLAG_ACTIVITY_NEW_TASK
         }
         context.startActivity(Intent.createChooser(intent, "Share Debloat Script").apply {
@@ -316,7 +396,7 @@ class DebloatViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             auditRepo.log(
                 tag = "SCRIPT_SHARED",
-                message = "Exported debloat script via Android share sheet.",
+                message = "Exported ${payload.actionType.label} script via Android share sheet.",
                 severity = LogSeverity.INFO
             )
         }
@@ -345,48 +425,85 @@ class DebloatViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun executeRootDebloat() {
-        val selected = _uiState.value.selectedPackageNames.toList()
-        if (selected.isEmpty()) {
+    fun executeBatchShellCommands(
+        actionType: ShellActionType = _uiState.value.shellActionType,
+        asRoot: Boolean = _uiState.value.hardwareInfo?.isRootAvailable == true
+    ) {
+        val targetCount = _uiState.value.commandPayload.targetCount
+        if (targetCount == 0) {
             viewModelScope.launch {
-                _snackBarEvent.emit("No packages selected to debloat.")
+                _snackBarEvent.emit("No target packages in Room selection to execute.")
             }
             return
         }
 
         viewModelScope.launch {
             _uiState.update { it.copy(isExecutingCommand = true) }
-            val method = _uiState.value.debloatMethod
-            var successCount = 0
-            var failCount = 0
 
             auditRepo.log(
-                tag = "ROOT_START",
-                message = "Executing on-device root debloat for ${selected.size} packages...",
+                tag = "EXEC_START",
+                message = "Executing ${actionType.label} for $targetCount Room-selected package(s) (Root: $asRoot)...",
                 severity = LogSeverity.INFO
             )
 
-            for (pkgName in selected) {
-                val cmd = "${method.commandPrefix} $pkgName"
-                val res = RootExecutor.executeCommand(cmd, asRoot = true)
-                if (res.isSuccess) {
-                    successCount++
-                } else {
-                    failCount++
-                }
-            }
+            val report = shellCommandService.executeSelectedCommands(
+                actionType = actionType,
+                asRoot = asRoot
+            )
 
             _uiState.update { it.copy(isExecutingCommand = false) }
 
+            val successCount = report.succeededPackages.size
+            val failCount = report.failedPackages.size
+
             auditRepo.log(
-                tag = "ROOT_FINISH",
-                message = "Root execution finished: $successCount succeeded, $failCount failed.",
-                severity = if (failCount == 0) LogSeverity.SUCCESS else LogSeverity.WARNING
+                tag = "EXEC_FINISH",
+                message = "${actionType.label} finished: $successCount succeeded, $failCount failed/denied.",
+                severity = if (failCount == 0) LogSeverity.SUCCESS else LogSeverity.WARNING,
+                commandExecuted = report.commandResults.firstOrNull()?.command
             )
 
-            _snackBarEvent.emit("Root Execution complete: $successCount disabled, $failCount failed/denied.")
-            // Refresh package status
+            if (failCount > 0 && !asRoot) {
+                _snackBarEvent.emit("Direct shell requires Root or ADB. Copied commands ready for PC ADB!")
+            } else {
+                _snackBarEvent.emit("${actionType.label}: $successCount succeeded, $failCount failed.")
+            }
             loadData()
+        }
+    }
+
+    fun executeSinglePackageShellCommand(packageName: String, actionType: ShellActionType) {
+        viewModelScope.launch {
+            val asRoot = _uiState.value.hardwareInfo?.isRootAvailable == true
+            val result = shellCommandService.executeSinglePackageCommand(
+                packageName = packageName,
+                actionType = actionType,
+                asRoot = asRoot
+            )
+            if (result.isSuccess) {
+                auditRepo.log(
+                    tag = "SINGLE_EXEC",
+                    message = "Executed ${actionType.label} on $packageName and updated Room DB state.",
+                    severity = LogSeverity.SUCCESS,
+                    commandExecuted = result.command
+                )
+                _snackBarEvent.emit("${actionType.label} succeeded for $packageName")
+            } else {
+                // Copy fallback command to clipboard automatically for convenience
+                val fallbackCmd = if (actionType == ShellActionType.RESTORE_APP) {
+                    "adb shell pm enable $packageName || adb shell cmd package install-existing $packageName"
+                } else {
+                    "adb shell pm disable-user --user 0 $packageName"
+                }
+                shellCommandService.copyCommandToClipboard(fallbackCmd)
+                auditRepo.log(
+                    tag = "SINGLE_EXEC_FALLBACK",
+                    message = "Direct execution blocked without Root; copied ADB command for $packageName to clipboard.",
+                    severity = LogSeverity.WARNING,
+                    commandExecuted = fallbackCmd
+                )
+                _snackBarEvent.emit("Root unavailable—copied ADB command for $packageName to clipboard!")
+            }
         }
     }
 
@@ -518,24 +635,19 @@ class DebloatViewModel(application: Application) : AndroidViewModel(application)
     fun getFilteredPackages(): List<BloatPackage> {
         val state = _uiState.value
         return state.packages.filter { pkg ->
-            // Search query
             val matchesQuery = state.searchQuery.isBlank() ||
-                    pkg.displayName.contains(state.searchQuery, ignoreCase = true) ||
-                    pkg.packageName.contains(state.searchQuery, ignoreCase = true) ||
-                    pkg.description.contains(state.searchQuery, ignoreCase = true)
+                pkg.displayName.contains(state.searchQuery, ignoreCase = true) ||
+                pkg.packageName.contains(state.searchQuery, ignoreCase = true) ||
+                pkg.description.contains(state.searchQuery, ignoreCase = true)
 
-            // Manufacturer filter
             val matchesOem = state.manufacturerFilter == DeviceManufacturer.ALL ||
-                    pkg.targetManufacturer == state.manufacturerFilter ||
-                    pkg.targetManufacturer == DeviceManufacturer.CARRIER_UNIVERSAL
+                pkg.targetManufacturer == state.manufacturerFilter ||
+                pkg.targetManufacturer == DeviceManufacturer.CARRIER_UNIVERSAL
 
-            // Category filter
             val matchesCategory = state.categoryFilter == null || pkg.category == state.categoryFilter
 
-            // Safety filter
             val matchesSafety = state.safetyFilter == null || pkg.safetyLevel == state.safetyFilter
 
-            // Installed filter
             val matchesInstalled = !state.onlyInstalled || pkg.isInstalled
 
             matchesQuery && matchesOem && matchesCategory && matchesSafety && matchesInstalled

@@ -1,6 +1,5 @@
 package com.example.ui.screens
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -8,9 +7,11 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -23,13 +24,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Checkbox
@@ -60,6 +60,9 @@ import com.example.data.model.DeviceManufacturer
 import com.example.data.model.SafetyLevel
 import com.example.ui.DebloatUiState
 import com.example.ui.components.HeaderMetricsCard
+import com.example.ui.components.RiskDistributionBar
+import com.example.ui.components.RiskLevelChip
+import com.example.ui.components.toVisualStyle
 import com.example.ui.theme.CautionAmber
 import com.example.ui.theme.CautionAmberBg
 import com.example.ui.theme.CautionAmberText
@@ -92,10 +95,21 @@ fun ChecklistScreen(
     onShowDetails: (BloatPackage) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    // Compute risk counts from the Room-backed package list (respecting installed filter)
+    val basePool = if (state.onlyInstalled) {
+        state.packages.filter { it.isInstalled }
+    } else {
+        state.packages
+    }
+    val safeCount = basePool.count { it.safetyLevel == SafetyLevel.SAFE }
+    val cautionCount = basePool.count { it.safetyLevel == SafetyLevel.CAUTION }
+    val criticalCount = basePool.count { it.safetyLevel == SafetyLevel.ESSENTIAL }
+
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
-            .background(SurfaceDark),
+            .background(SurfaceDark)
+            .testTag("checklist_lazy_column"),
         contentPadding = PaddingValues(bottom = 96.dp)
     ) {
         // Top Header Performance Boost Dashboard
@@ -107,6 +121,19 @@ fun ChecklistScreen(
                 onClearSelection = onClearSelection,
                 modifier = Modifier.padding(16.dp)
             )
+        }
+
+        // Visual Risk Distribution Bar from Room Database
+        item {
+            RiskDistributionBar(
+                safeCount = safeCount,
+                cautionCount = cautionCount,
+                criticalCount = criticalCount,
+                selectedFilter = state.safetyFilter,
+                onSelectFilter = onSafetyFilterChange,
+                modifier = Modifier.padding(horizontal = 16.dp)
+            )
+            Spacer(modifier = Modifier.height(12.dp))
         }
 
         // Search and Filters Section
@@ -144,36 +171,35 @@ fun ChecklistScreen(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // Safety Filter Chips
+                // Color-Coded Risk Level Filter Chips
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    // All Safety levels
                     FilterChip(
                         selected = state.safetyFilter == null,
                         onClick = { onSafetyFilterChange(null) },
-                        label = { Text("All Safety") },
+                        label = { Text("All Risks (${basePool.size})") },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = CyberCyan.copy(alpha = 0.2f),
                             selectedLabelColor = CyberCyan,
                             containerColor = SurfaceCard,
                             labelColor = TextSecondary
                         ),
-                        shape = RoundedCornerShape(10.dp)
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.testTag("filter_chip_all_risks")
                     )
 
-                    // Safe Only
                     FilterChip(
                         selected = state.safetyFilter == SafetyLevel.SAFE,
                         onClick = {
                             onSafetyFilterChange(if (state.safetyFilter == SafetyLevel.SAFE) null else SafetyLevel.SAFE)
                         },
-                        label = { Text("Safe Only (No Risk)") },
+                        label = { Text("${SafetyLevel.SAFE.label} ($safeCount)") },
                         leadingIcon = {
-                            Icon(Icons.Default.Security, contentDescription = null, tint = NeonEmerald, modifier = Modifier.size(14.dp))
+                            Icon(Icons.Default.CheckCircle, contentDescription = null, tint = NeonEmerald, modifier = Modifier.size(14.dp))
                         },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = SafeGreenBg,
@@ -181,16 +207,16 @@ fun ChecklistScreen(
                             containerColor = SurfaceCard,
                             labelColor = TextSecondary
                         ),
-                        shape = RoundedCornerShape(10.dp)
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.testTag("filter_chip_safe")
                     )
 
-                    // Caution
                     FilterChip(
                         selected = state.safetyFilter == SafetyLevel.CAUTION,
                         onClick = {
                             onSafetyFilterChange(if (state.safetyFilter == SafetyLevel.CAUTION) null else SafetyLevel.CAUTION)
                         },
-                        label = { Text("Caution / Optional") },
+                        label = { Text("${SafetyLevel.CAUTION.label} ($cautionCount)") },
                         leadingIcon = {
                             Icon(Icons.Default.Warning, contentDescription = null, tint = CautionAmber, modifier = Modifier.size(14.dp))
                         },
@@ -200,7 +226,27 @@ fun ChecklistScreen(
                             containerColor = SurfaceCard,
                             labelColor = TextSecondary
                         ),
-                        shape = RoundedCornerShape(10.dp)
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.testTag("filter_chip_caution")
+                    )
+
+                    FilterChip(
+                        selected = state.safetyFilter == SafetyLevel.ESSENTIAL,
+                        onClick = {
+                            onSafetyFilterChange(if (state.safetyFilter == SafetyLevel.ESSENTIAL) null else SafetyLevel.ESSENTIAL)
+                        },
+                        label = { Text("${SafetyLevel.ESSENTIAL.label} ($criticalCount)") },
+                        leadingIcon = {
+                            Icon(Icons.Default.Shield, contentDescription = null, tint = CriticalRed, modifier = Modifier.size(14.dp))
+                        },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = DangerRedBg,
+                            selectedLabelColor = DangerRedText,
+                            containerColor = SurfaceCard,
+                            labelColor = TextSecondary
+                        ),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.testTag("filter_chip_essential")
                     )
                 }
 
@@ -354,9 +400,11 @@ fun PackageItemCard(
     modifier: Modifier = Modifier
 ) {
     val isCritical = packageItem.safetyLevel == SafetyLevel.ESSENTIAL
+    val riskStyle = packageItem.safetyLevel.toVisualStyle()
+
     val cardBorder = when {
         isSelected -> CyberCyan
-        isCritical -> CriticalRed.copy(alpha = 0.3f)
+        isCritical -> CriticalRed.copy(alpha = 0.45f)
         else -> Color(0xFF1E293B)
     }
 
@@ -373,144 +421,144 @@ fun PackageItemCard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(12.dp),
+                .height(IntrinsicSize.Min),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Checkbox or Lock Icon
-            if (isCritical) {
-                Box(
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(CircleShape)
-                        .background(DangerRedBg),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Lock,
-                        contentDescription = "Protected System Component",
-                        tint = DangerRedText,
-                        modifier = Modifier.size(18.dp)
+            // Color-coded left edge risk indicator bar
+            Box(
+                modifier = Modifier
+                    .width(5.dp)
+                    .fillMaxHeight()
+                    .background(riskStyle.accentBarColor)
+            )
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Checkbox or Lock Icon
+                if (isCritical) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(DangerRedBg),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Lock,
+                            contentDescription = "Protected Critical System Component",
+                            tint = DangerRedText,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                } else {
+                    Checkbox(
+                        checked = isSelected,
+                        onCheckedChange = { onToggleSelect() },
+                        colors = CheckboxDefaults.colors(
+                            checkedColor = CyberCyan,
+                            uncheckedColor = TextMuted,
+                            checkmarkColor = Color.Black
+                        ),
+                        modifier = Modifier.testTag("checkbox_${packageItem.packageName}")
                     )
                 }
-            } else {
-                Checkbox(
-                    checked = isSelected,
-                    onCheckedChange = { onToggleSelect() },
-                    colors = CheckboxDefaults.colors(
-                        checkedColor = CyberCyan,
-                        uncheckedColor = TextMuted,
-                        checkmarkColor = Color.Black
-                    ),
-                    modifier = Modifier.testTag("checkbox_${packageItem.packageName}")
-                )
-            }
 
-            Spacer(modifier = Modifier.width(10.dp))
+                Spacer(modifier = Modifier.width(10.dp))
 
-            // Info Column
-            Column(modifier = Modifier.weight(1f)) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
+                // Info Column
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = packageItem.displayName,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = TextPrimary,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+
+                        // Disabled / Frozen badge
+                        if (packageItem.isInstalled && !packageItem.isEnabled) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(Color(0xFF334155))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = "FROZEN",
+                                    color = TextSecondary,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(2.dp))
+
+                    // Monospace Package Name
                     Text(
-                        text = packageItem.displayName,
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = TextPrimary,
-                        fontWeight = FontWeight.SemiBold,
+                        text = packageItem.packageName,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = CyberCyanDim,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 11.sp,
                         maxLines = 1
                     )
 
-                    // Disabled badge
-                    if (packageItem.isInstalled && !packageItem.isEnabled) {
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(Color(0xFF334155))
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                        ) {
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Color-Coded Risk Chip + Category & RAM Benefit Row
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        RiskLevelChip(
+                            safetyLevel = packageItem.safetyLevel,
+                            compact = true,
+                            modifier = Modifier.testTag("risk_indicator_chip_${packageItem.packageName}")
+                        )
+
+                        Text(
+                            text = packageItem.category.displayName,
+                            color = TextMuted,
+                            fontSize = 10.sp,
+                            maxLines = 1
+                        )
+
+                        if (packageItem.ramSavingMb > 0) {
                             Text(
-                                text = "FROZEN",
-                                color = TextSecondary,
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold
+                                text = "• +${packageItem.ramSavingMb}MB",
+                                color = NeonEmerald,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Medium
                             )
                         }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(2.dp))
-
-                // Monospace Package Name
-                Text(
-                    text = packageItem.packageName,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = CyberCyanDim,
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 11.sp,
-                    maxLines = 1
-                )
-
-                Spacer(modifier = Modifier.height(6.dp))
-
-                // Metadata Row
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                // Info / Details icon button
+                IconButton(
+                    onClick = onOpenDetails,
+                    modifier = Modifier
+                        .size(36.dp)
+                        .testTag("details_button_${packageItem.packageName}")
                 ) {
-                    // Safety Badge
-                    val (badgeBg, badgeText) = when (packageItem.safetyLevel) {
-                        SafetyLevel.SAFE -> Pair(SafeGreenBg, SafeGreenText)
-                        SafetyLevel.CAUTION -> Pair(CautionAmberBg, CautionAmberText)
-                        SafetyLevel.ESSENTIAL -> Pair(DangerRedBg, DangerRedText)
-                    }
-
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(badgeBg)
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                    ) {
-                        Text(
-                            text = packageItem.safetyLevel.label,
-                            color = badgeText,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-
-                    // Category
-                    Text(
-                        text = packageItem.category.displayName,
-                        color = TextMuted,
-                        fontSize = 10.sp
+                    Icon(
+                        imageVector = Icons.Default.Info,
+                        contentDescription = "Package Details",
+                        tint = TextSecondary,
+                        modifier = Modifier.size(20.dp)
                     )
-
-                    // Memory saving
-                    if (packageItem.ramSavingMb > 0) {
-                        Text(
-                            text = "• +${packageItem.ramSavingMb}MB",
-                            color = NeonEmerald,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
                 }
-            }
-
-            // Info / Details icon button
-            IconButton(
-                onClick = onOpenDetails,
-                modifier = Modifier
-                    .size(36.dp)
-                    .testTag("details_button_${packageItem.packageName}")
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Info,
-                    contentDescription = "Package Details",
-                    tint = TextSecondary,
-                    modifier = Modifier.size(20.dp)
-                )
             }
         }
     }

@@ -16,16 +16,18 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Terminal
-import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -34,6 +36,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -48,11 +51,11 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.ui.DebloatMethod
+import com.example.data.service.PackageShellCommand
+import com.example.data.service.ShellActionType
+import com.example.data.service.ShellTargetFormat
 import com.example.ui.DebloatUiState
 import com.example.ui.theme.CautionAmber
-import com.example.ui.theme.CautionAmberBg
-import com.example.ui.theme.CautionAmberText
 import com.example.ui.theme.CyberCyan
 import com.example.ui.theme.NeonEmerald
 import com.example.ui.theme.SafeGreenBg
@@ -66,13 +69,18 @@ import com.example.ui.theme.TextSecondary
 @Composable
 fun TerminalActionScreen(
     state: DebloatUiState,
-    onSetMethod: (DebloatMethod) -> Unit,
+    onSetActionType: (ShellActionType) -> Unit,
+    onSetTargetFormat: (ShellTargetFormat) -> Unit,
     onCopyScript: () -> Unit,
+    onCopySingleLine: () -> Unit,
+    onCopyIndividualCommand: (packageName: String, commandText: String, label: String) -> Unit,
     onShareScript: () -> Unit,
-    onExecuteRoot: () -> Unit,
+    onExecuteBatch: () -> Unit,
+    onExecuteSinglePackage: (packageName: String, actionType: ShellActionType) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val isRoot = state.hardwareInfo?.isRootAvailable ?: false
+    val payload = state.commandPayload
 
     LazyColumn(
         modifier = modifier
@@ -90,14 +98,14 @@ fun TerminalActionScreen(
             ) {
                 Column {
                     Text(
-                        text = "ADB & EXECUTION SUITE",
+                        text = "ROOM-BACKED SHELL SERVICE",
                         style = MaterialTheme.typography.labelSmall,
                         color = CyberCyan,
                         letterSpacing = 1.2.sp,
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = "Script Generator",
+                        text = "ADB & Command Suite",
                         style = MaterialTheme.typography.headlineSmall,
                         color = TextPrimary,
                         fontWeight = FontWeight.Bold
@@ -120,7 +128,7 @@ fun TerminalActionScreen(
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = if (isRoot) "ROOT ACTIVE" else "ADB NON-ROOT",
+                            text = if (isRoot) "ROOT ACTIVE" else "ADB / SHELL MODE",
                             color = if (isRoot) SafeGreenText else TextSecondary,
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Bold
@@ -130,7 +138,7 @@ fun TerminalActionScreen(
             }
         }
 
-        // Method Selector
+        // Operation Type & Format Configuration Card
         item {
             Card(
                 colors = CardDefaults.cardColors(containerColor = SurfaceCard),
@@ -141,7 +149,7 @@ fun TerminalActionScreen(
             ) {
                 Column(modifier = Modifier.padding(14.dp)) {
                     Text(
-                        text = "DEBLOAT METHOD",
+                        text = "1. SELECT OPERATION MODE (DISABLE OR RESTORE)",
                         style = MaterialTheme.typography.labelSmall,
                         color = TextSecondary,
                         letterSpacing = 1.sp
@@ -149,33 +157,76 @@ fun TerminalActionScreen(
                     Spacer(modifier = Modifier.height(8.dp))
 
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        DebloatMethod.values().forEach { method ->
-                            val isSelected = state.debloatMethod == method
+                        ShellActionType.values().forEach { action ->
+                            val isSelected = state.shellActionType == action
+                            val activeColor = if (action == ShellActionType.RESTORE_APP) NeonEmerald else CyberCyan
                             FilterChip(
                                 selected = isSelected,
-                                onClick = { onSetMethod(method) },
-                                label = { Text(method.label, fontSize = 12.sp) },
+                                onClick = { onSetActionType(action) },
+                                label = {
+                                    Text(
+                                        text = action.label,
+                                        fontSize = 12.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                },
                                 colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = CyberCyan.copy(alpha = 0.2f),
-                                    selectedLabelColor = CyberCyan,
+                                    selectedContainerColor = activeColor.copy(alpha = 0.2f),
+                                    selectedLabelColor = activeColor,
                                     containerColor = Color(0xFF0F172A),
                                     labelColor = TextMuted
                                 ),
                                 shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier.weight(1f)
+                                modifier = Modifier.testTag("action_mode_${action.name.lowercase()}")
                             )
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = state.debloatMethod.description,
+                        text = state.shellActionType.description,
                         style = MaterialTheme.typography.bodySmall,
                         color = TextMuted
                     )
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Text(
+                        text = "2. TARGET SHELL ENVIRONMENT",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TextSecondary,
+                        letterSpacing = 1.sp
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        ShellTargetFormat.values().forEach { format ->
+                            val isSelected = state.shellTargetFormat == format
+                            FilterChip(
+                                selected = isSelected,
+                                onClick = { onSetTargetFormat(format) },
+                                label = { Text(format.label, fontSize = 11.sp) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = Color(0xFF1E3A5F),
+                                    selectedLabelColor = CyberCyan,
+                                    containerColor = Color(0xFF0F172A),
+                                    labelColor = TextMuted
+                                ),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.testTag("format_mode_${format.name.lowercase()}")
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -197,7 +248,7 @@ fun TerminalActionScreen(
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "COMMAND BUFFER (${state.selectedPackageNames.size} TARGETS)",
+                            text = "GENERATED SHELL BUFFER (${payload.targetCount} ROOM APPS)",
                             style = MaterialTheme.typography.labelSmall,
                             color = TextPrimary,
                             fontWeight = FontWeight.Bold
@@ -205,7 +256,7 @@ fun TerminalActionScreen(
                     }
 
                     Text(
-                        text = "Bash / Shell",
+                        text = state.shellTargetFormat.label,
                         style = MaterialTheme.typography.labelSmall,
                         color = TextMuted,
                         fontFamily = FontFamily.Monospace
@@ -214,7 +265,6 @@ fun TerminalActionScreen(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Terminal Surface
                 Surface(
                     color = Color(0xFF060911),
                     shape = RoundedCornerShape(14.dp),
@@ -227,7 +277,6 @@ fun TerminalActionScreen(
                             .fillMaxWidth()
                             .padding(14.dp)
                     ) {
-                        // Window dots
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             Box(modifier = Modifier.size(10.dp).clip(CircleShape).background(Color(0xFFEF4444)))
                             Box(modifier = Modifier.size(10.dp).clip(CircleShape).background(Color(0xFFF59E0B)))
@@ -239,14 +288,14 @@ fun TerminalActionScreen(
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(220.dp)
+                                .height(200.dp)
                                 .horizontalScroll(rememberScrollState())
                         ) {
                             Text(
                                 text = state.generatedScript,
                                 fontFamily = FontFamily.Monospace,
                                 fontSize = 12.sp,
-                                color = if (state.selectedPackageNames.isEmpty()) TextMuted else CyberCyan,
+                                color = if (payload.targetCount == 0) TextMuted else if (state.shellActionType == ShellActionType.RESTORE_APP) NeonEmerald else CyberCyan,
                                 lineHeight = 18.sp
                             )
                         }
@@ -255,14 +304,14 @@ fun TerminalActionScreen(
             }
         }
 
-        // Action Buttons Row
+        // Batch Copy & Execution Buttons
         item {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Button(
                     onClick = onCopyScript,
-                    enabled = state.selectedPackageNames.isNotEmpty(),
+                    enabled = payload.targetCount > 0,
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = CyberCyan,
+                        containerColor = if (state.shellActionType == ShellActionType.RESTORE_APP) NeonEmerald else CyberCyan,
                         contentColor = Color.Black
                     ),
                     shape = RoundedCornerShape(12.dp),
@@ -272,16 +321,32 @@ fun TerminalActionScreen(
                 ) {
                     Icon(imageVector = Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text(text = "Copy All ADB Commands (${state.selectedPackageNames.size})", fontWeight = FontWeight.Bold)
+                    Text(
+                        text = "Copy ${state.shellActionType.label} Commands (${payload.targetCount})",
+                        fontWeight = FontWeight.Bold
+                    )
                 }
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     OutlinedButton(
+                        onClick = onCopySingleLine,
+                        enabled = payload.targetCount > 0,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("copy_oneliner_button")
+                    ) {
+                        Icon(imageVector = Icons.Default.Code, contentDescription = null, tint = CyberCyan, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(text = "Copy 1-Liner", color = TextPrimary, fontSize = 12.sp)
+                    }
+
+                    OutlinedButton(
                         onClick = onShareScript,
-                        enabled = state.selectedPackageNames.isNotEmpty(),
+                        enabled = payload.targetCount > 0,
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier
                             .weight(1f)
@@ -289,32 +354,71 @@ fun TerminalActionScreen(
                     ) {
                         Icon(imageVector = Icons.Default.Share, contentDescription = null, tint = CyberCyan, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text(text = "Export Script", color = TextPrimary)
-                    }
-
-                    if (isRoot) {
-                        Button(
-                            onClick = onExecuteRoot,
-                            enabled = state.selectedPackageNames.isNotEmpty() && !state.isExecutingCommand,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = NeonEmerald,
-                                contentColor = Color.Black
-                            ),
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier
-                                .weight(1.2f)
-                                .testTag("execute_root_button")
-                        ) {
-                            if (state.isExecutingCommand) {
-                                CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.Black, strokeWidth = 2.dp)
-                            } else {
-                                Icon(imageVector = Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(text = "Execute Root (su)", fontWeight = FontWeight.Bold)
-                            }
-                        }
+                        Text(text = "Export .sh", color = TextPrimary, fontSize = 12.sp)
                     }
                 }
+
+                Button(
+                    onClick = onExecuteBatch,
+                    enabled = payload.targetCount > 0 && !state.isExecutingCommand,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (isRoot) NeonEmerald else Color(0xFF1E293B),
+                        contentColor = if (isRoot) Color.Black else TextPrimary
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("execute_batch_button")
+                ) {
+                    if (state.isExecutingCommand) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            color = if (isRoot) Color.Black else CyberCyan,
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        Icon(imageVector = Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = if (isRoot) {
+                                "Execute ${state.shellActionType.label} on Device (Root)"
+                            } else {
+                                "Attempt Direct Shell Execution (${payload.targetCount} Apps)"
+                            },
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+        }
+
+        // Individual Package Command Cards (for granular copy/execute of disable or restore)
+        if (payload.packageCommands.isNotEmpty()) {
+            item {
+                Text(
+                    text = "INDIVIDUAL PACKAGE SHELL COMMANDS (${payload.packageCommands.size})",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextSecondary,
+                    letterSpacing = 1.sp
+                )
+            }
+
+            items(payload.packageCommands, key = { it.packageName }) { itemCmd ->
+                IndividualCommandCard(
+                    item = itemCmd,
+                    onCopyDisable = {
+                        onCopyIndividualCommand(itemCmd.packageName, itemCmd.disableCommand, "Disable")
+                    },
+                    onCopyRestore = {
+                        onCopyIndividualCommand(itemCmd.packageName, itemCmd.restoreCommand, "Restore")
+                    },
+                    onExecuteDisable = {
+                        onExecuteSinglePackage(itemCmd.packageName, ShellActionType.DISABLE_USER)
+                    },
+                    onExecuteRestore = {
+                        onExecuteSinglePackage(itemCmd.packageName, ShellActionType.RESTORE_APP)
+                    }
+                )
             }
         }
 
@@ -363,6 +467,117 @@ fun TerminalActionScreen(
                         title = "Connect & Run",
                         description = "Connect phone to PC, open Terminal / PowerShell, type 'adb devices' to allow access, and paste the copied commands!"
                     )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun IndividualCommandCard(
+    item: PackageShellCommand,
+    onCopyDisable: () -> Unit,
+    onCopyRestore: () -> Unit,
+    onExecuteDisable: () -> Unit,
+    onExecuteRestore: () -> Unit
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .border(1.dp, Color(0xFF1E293B), RoundedCornerShape(12.dp)),
+        color = SurfaceCard
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = item.displayName,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = TextPrimary,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = item.packageName,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = CyberCyan,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 11.sp
+                    )
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    IconButton(
+                        onClick = onCopyDisable,
+                        modifier = Modifier
+                            .size(34.dp)
+                            .testTag("copy_disable_${item.packageName}")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ContentCopy,
+                            contentDescription = "Copy Disable Command",
+                            tint = CyberCyan,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                    IconButton(
+                        onClick = onCopyRestore,
+                        modifier = Modifier
+                            .size(34.dp)
+                            .testTag("copy_restore_${item.packageName}")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Restore,
+                            contentDescription = "Copy Restore Command",
+                            tint = NeonEmerald,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(Color(0xFF0A0F1D))
+                    .padding(8.dp)
+            ) {
+                Text(
+                    text = "$ ${item.activeCommand}",
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 11.sp,
+                    color = TextSecondary
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = onExecuteDisable,
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Run Disable", fontSize = 11.sp, color = CyberCyan)
+                }
+                OutlinedButton(
+                    onClick = onExecuteRestore,
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Run Restore", fontSize = 11.sp, color = NeonEmerald)
                 }
             }
         }

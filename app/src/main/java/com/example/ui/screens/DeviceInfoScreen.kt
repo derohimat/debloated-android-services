@@ -18,11 +18,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Security
-import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -39,12 +37,12 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.model.SafetyLevel
 import com.example.ui.DebloatUiState
 import com.example.ui.theme.CautionAmber
+import com.example.ui.theme.CriticalRed
 import com.example.ui.theme.CyberCyan
 import com.example.ui.theme.NeonEmerald
-import com.example.ui.theme.SafeGreenBg
-import com.example.ui.theme.SafeGreenText
 import com.example.ui.theme.SurfaceCard
 import com.example.ui.theme.SurfaceDark
 import com.example.ui.theme.TextMuted
@@ -57,6 +55,13 @@ fun DeviceInfoScreen(
     modifier: Modifier = Modifier
 ) {
     val dev = state.hardwareInfo
+    val totalStored = state.packages.size
+    val installedCount = state.packages.count { it.isInstalled }
+    val enabledCount = state.packages.count { it.isEnabled }
+    val disabledCount = state.packages.count { !it.isEnabled }
+    val safeCount = state.packages.count { it.safetyLevel == SafetyLevel.SAFE }
+    val cautionCount = state.packages.count { it.safetyLevel == SafetyLevel.CAUTION }
+    val essentialCount = state.packages.count { it.safetyLevel == SafetyLevel.ESSENTIAL }
 
     LazyColumn(
         modifier = modifier
@@ -75,7 +80,7 @@ fun DeviceInfoScreen(
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    text = "System Profile",
+                    text = "System Profile & DB",
                     style = MaterialTheme.typography.headlineSmall,
                     color = TextPrimary,
                     fontWeight = FontWeight.Bold
@@ -148,6 +153,85 @@ fun DeviceInfoScreen(
                         accent = TextPrimary,
                         modifier = Modifier.fillMaxWidth()
                     )
+                }
+            }
+        }
+
+        // Room Database Schema & Storage Metrics Card
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = SurfaceCard),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, Color(0xFF334155), RoundedCornerShape(16.dp))
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Storage, contentDescription = null, tint = NeonEmerald, modifier = Modifier.size(20.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text(
+                                text = "ROOM SQLITE SCHEMA (system_applications)",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = TextPrimary
+                            )
+                            Text(
+                                text = "debloat_master.db • Indexed by safety_level, is_enabled, package_name",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = TextMuted,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 10.sp
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        ProfileInfoBox(
+                            title = "Persisted Apps",
+                            value = "$totalStored ($installedCount installed)",
+                            accent = CyberCyan,
+                            modifier = Modifier.weight(1f)
+                        )
+                        ProfileInfoBox(
+                            title = "Enabled / Disabled",
+                            value = "$enabledCount Active • $disabledCount Frozen",
+                            accent = NeonEmerald,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        ProfileInfoBox(
+                            title = "Safe Risk",
+                            value = "$safeCount Apps",
+                            accent = NeonEmerald,
+                            modifier = Modifier.weight(1f)
+                        )
+                        ProfileInfoBox(
+                            title = "Caution Risk",
+                            value = "$cautionCount Apps",
+                            accent = CautionAmber,
+                            modifier = Modifier.weight(1f)
+                        )
+                        ProfileInfoBox(
+                            title = "Critical Locked",
+                            value = "$essentialCount Apps",
+                            accent = CriticalRed,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
                 }
             }
         }
