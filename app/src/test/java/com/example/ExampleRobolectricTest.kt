@@ -9,6 +9,7 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onChildren
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
@@ -16,6 +17,7 @@ import com.example.data.local.DebloatDatabase
 import com.example.data.local.SystemAppEntity
 import com.example.data.local.toDomainModel
 import com.example.data.model.BloatCategory
+import com.example.data.model.BloatPackage
 import com.example.data.model.DebloatSnapshot
 import com.example.data.model.DeviceManufacturer
 import com.example.data.model.SafetyLevel
@@ -246,6 +248,73 @@ class ExampleRobolectricTest {
             .onChildren()
             .filterToOne(hasText("Critical system"))
             .assertIsDisplayed()
+    }
+
+    @Test
+    fun `bulk select and deselect toggle feature allows quick bulk actions on candidate apps`() = runBlocking {
+        var selectAllCalled = false
+        var deselectAllCalled = false
+
+        val testPackages = listOf(
+            BloatPackage(
+                packageName = "com.miui.analytics",
+                displayName = "Analytics",
+                isEnabled = true,
+                isInstalled = true,
+                safetyLevel = SafetyLevel.SAFE,
+                category = BloatCategory.TELEMETRY,
+                targetManufacturer = DeviceManufacturer.XIAOMI,
+                description = "Xiaomi tracking"
+            ),
+            BloatPackage(
+                packageName = "com.facebook.services",
+                displayName = "Facebook Services",
+                isEnabled = true,
+                isInstalled = true,
+                safetyLevel = SafetyLevel.SAFE,
+                category = BloatCategory.SOCIAL_PRELOAD,
+                targetManufacturer = DeviceManufacturer.CARRIER_UNIVERSAL,
+                description = "Facebook background service"
+            )
+        )
+
+        composeTestRule.setContent {
+            MyApplicationTheme {
+                ChecklistScreen(
+                    state = DebloatUiState(
+                        isLoading = false,
+                        packages = testPackages,
+                        selectedPackageNames = setOf("com.miui.analytics"),
+                        onlyInstalled = true
+                    ),
+                    filteredPackages = testPackages,
+                    onToggleSelect = {},
+                    onApplyPreset = {},
+                    onClearSelection = {},
+                    onSelectAllVisible = { selectAllCalled = true },
+                    onDeselectAllVisible = { deselectAllCalled = true },
+                    onSearchChange = {},
+                    onManufacturerFilterChange = {},
+                    onSafetyFilterChange = {},
+                    onToggleOnlyInstalled = {},
+                    onShowDetails = {}
+                )
+            }
+        }
+
+        composeTestRule.waitForIdle()
+
+        composeTestRule
+            .onNodeWithTag("checklist_lazy_column")
+            .performScrollToNode(hasTestTag("bulk_selection_bar"))
+
+        composeTestRule.onNodeWithTag("bulk_selection_bar").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("select_all_toggle").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("select_all_button").assertIsDisplayed().performClick()
+        assertTrue(selectAllCalled)
+
+        composeTestRule.onNodeWithTag("deselect_all_button").assertIsDisplayed().performClick()
+        assertTrue(deselectAllCalled)
     }
 
     @Test

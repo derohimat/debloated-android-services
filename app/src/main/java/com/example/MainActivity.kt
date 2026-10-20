@@ -265,6 +265,7 @@ class MainActivity : ComponentActivity() {
                                 onApplyPreset = { viewModel.applyPreset(it) },
                                 onClearSelection = { viewModel.clearSelection() },
                                 onSelectAllVisible = { viewModel.selectAllVisible() },
+                                onDeselectAllVisible = { viewModel.deselectAllVisible() },
                                 onSearchChange = { viewModel.setSearchQuery(it) },
                                 onManufacturerFilterChange = { viewModel.setManufacturerFilter(it) },
                                 onSafetyFilterChange = { viewModel.setSafetyFilter(it) },

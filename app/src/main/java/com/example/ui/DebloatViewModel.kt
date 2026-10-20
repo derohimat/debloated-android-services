@@ -292,6 +292,43 @@ class DebloatViewModel(application: Application) : AndroidViewModel(application)
 
         viewModelScope.launch {
             scannerRepo.setSelectedPackages(updated)
+            auditRepo.log(
+                tag = "BULK_SELECT",
+                message = "Selected all visible candidates (${safeToSelect.size} packages) for debloating.",
+                severity = LogSeverity.INFO
+            )
+            _snackBarEvent.emit("Selected ${safeToSelect.size} candidate application(s)")
+        }
+    }
+
+    fun deselectAllVisible() {
+        val visible = getFilteredPackages().map { it.packageName }.toSet()
+        val current = _uiState.value.selectedPackageNames
+        val countDeselected = current.count { visible.contains(it) }
+        val updated = if (countDeselected > 0) {
+            current.filter { !visible.contains(it) }.toSet()
+        } else {
+            emptySet()
+        }
+        _uiState.update { it.copy(selectedPackageNames = updated, activePreset = null) }
+        updatePerformanceMetrics()
+
+        viewModelScope.launch {
+            scannerRepo.setSelectedPackages(updated)
+            auditRepo.log(
+                tag = "BULK_DESELECT",
+                message = "Deselected $countDeselected candidate application(s).",
+                severity = LogSeverity.INFO
+            )
+            _snackBarEvent.emit(if (countDeselected > 0) "Deselected $countDeselected application(s)" else "All applications deselected")
+        }
+    }
+
+    fun toggleSelectAllVisible(selectAll: Boolean) {
+        if (selectAll) {
+            selectAllVisible()
+        } else {
+            deselectAllVisible()
         }
     }
 

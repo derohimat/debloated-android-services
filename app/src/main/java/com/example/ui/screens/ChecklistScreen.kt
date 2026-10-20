@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -26,10 +27,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Deselect
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Checkbox
@@ -45,6 +48,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TriStateCheckbox
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -88,6 +93,7 @@ fun ChecklistScreen(
     onApplyPreset: (String) -> Unit,
     onClearSelection: () -> Unit,
     onSelectAllVisible: () -> Unit,
+    onDeselectAllVisible: () -> Unit = {},
     onSearchChange: (String) -> Unit,
     onManufacturerFilterChange: (DeviceManufacturer) -> Unit,
     onSafetyFilterChange: (SafetyLevel?) -> Unit,
@@ -104,6 +110,18 @@ fun ChecklistScreen(
     val safeCount = basePool.count { it.safetyLevel == SafetyLevel.SAFE }
     val cautionCount = basePool.count { it.safetyLevel == SafetyLevel.CAUTION }
     val criticalCount = basePool.count { it.safetyLevel == SafetyLevel.ESSENTIAL }
+
+    val selectableInList = filteredPackages.filter { it.safetyLevel != SafetyLevel.ESSENTIAL && it.isEnabled }
+    val selectedInList = selectableInList.filter { state.selectedPackageNames.contains(it.packageName) }
+    val totalSelectable = selectableInList.size
+    val totalSelectedInList = selectedInList.size
+
+    val bulkToggleState = when {
+        totalSelectable == 0 -> ToggleableState.Off
+        totalSelectedInList == totalSelectable -> ToggleableState.On
+        totalSelectedInList > 0 -> ToggleableState.Indeterminate
+        else -> ToggleableState.Off
+    }
 
     LazyColumn(
         modifier = modifier
@@ -320,29 +338,234 @@ fun ChecklistScreen(
             }
         }
 
+        // Dedicated 'Select All' and 'Deselect All' Toggle Feature at the top of the app list
         item {
-            Spacer(modifier = Modifier.height(12.dp))
-            Row(
+            Spacer(modifier = Modifier.height(14.dp))
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                    .padding(horizontal = 16.dp)
             ) {
-                Text(
-                    text = "CANDIDATE APPLICATIONS (${filteredPackages.size})",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = TextMuted,
-                    letterSpacing = 1.sp
-                )
-                Text(
-                    text = "${state.selectedPackageNames.size} marked for debloat",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (state.selectedPackageNames.isNotEmpty()) NeonEmerald else TextMuted,
-                    fontWeight = FontWeight.Bold
-                )
+                // Section Title & Dynamic Selection Counter
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "CANDIDATE APPLICATIONS (${filteredPackages.size})",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TextMuted,
+                        letterSpacing = 1.sp
+                    )
+                    Text(
+                        text = "$totalSelectedInList of $totalSelectable selected",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (totalSelectedInList > 0) NeonEmerald else TextMuted,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.testTag("selection_status_label")
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Bulk Action Bar: Master TriState Toggle + Quick Select/Deselect Actions
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("bulk_selection_bar"),
+                    color = Color(0xFF131D2E),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, Color(0xFF1E293B))
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // Master TriState Checkbox Toggle
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable {
+                                        if (bulkToggleState == ToggleableState.On) {
+                                            onDeselectAllVisible()
+                                        } else {
+                                            onSelectAllVisible()
+                                        }
+                                    }
+                                    .padding(vertical = 4.dp, horizontal = 4.dp)
+                                    .testTag("select_all_toggle")
+                            ) {
+                                TriStateCheckbox(
+                                    state = bulkToggleState,
+                                    onClick = {
+                                        if (bulkToggleState == ToggleableState.On) {
+                                            onDeselectAllVisible()
+                                        } else {
+                                            onSelectAllVisible()
+                                        }
+                                    },
+                                    colors = CheckboxDefaults.colors(
+                                        checkedColor = CyberCyan,
+                                        checkmarkColor = Color.Black,
+                                        uncheckedColor = Color(0xFF64748B)
+                                    ),
+                                    modifier = Modifier.testTag("select_all_checkbox")
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Column {
+                                    Text(
+                                        text = when (bulkToggleState) {
+                                            ToggleableState.On -> "Deselect All"
+                                            ToggleableState.Indeterminate -> "Select All"
+                                            ToggleableState.Off -> "Select All"
+                                        },
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (totalSelectedInList > 0) CyberCyan else TextPrimary
+                                    )
+                                    Text(
+                                        text = if (totalSelectedInList > 0) "Tap to uncheck visible" else "Tap to check all safe ($totalSelectable)",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = TextMuted,
+                                        fontSize = 11.sp
+                                    )
+                                }
+                            }
+
+                            // Dedicated 'Select All' and 'Deselect All' Action Buttons
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                // Select All Button
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = if (totalSelectable > 0 && totalSelectedInList < totalSelectable) {
+                                        CyberCyan.copy(alpha = 0.15f)
+                                    } else {
+                                        Color(0xFF1E293B)
+                                    },
+                                    border = BorderStroke(
+                                        1.dp,
+                                        if (totalSelectable > 0 && totalSelectedInList < totalSelectable) {
+                                            CyberCyan.copy(alpha = 0.5f)
+                                        } else {
+                                            Color(0xFF334155)
+                                        }
+                                    ),
+                                    modifier = Modifier
+                                        .testTag("select_all_button")
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable(enabled = totalSelectable > 0) { onSelectAllVisible() }
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.SelectAll,
+                                            contentDescription = "Select All",
+                                            tint = if (totalSelectable > 0) CyberCyan else TextMuted,
+                                            modifier = Modifier.size(15.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            text = "Select All",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = if (totalSelectable > 0) CyberCyan else TextMuted
+                                        )
+                                    }
+                                }
+
+                                // Deselect All Button
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = if (totalSelectedInList > 0 || state.selectedPackageNames.isNotEmpty()) {
+                                        CriticalRed.copy(alpha = 0.15f)
+                                    } else {
+                                        Color(0xFF1E293B)
+                                    },
+                                    border = BorderStroke(
+                                        1.dp,
+                                        if (totalSelectedInList > 0 || state.selectedPackageNames.isNotEmpty()) {
+                                            CriticalRed.copy(alpha = 0.5f)
+                                        } else {
+                                            Color(0xFF334155)
+                                        }
+                                    ),
+                                    modifier = Modifier
+                                        .testTag("deselect_all_button")
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable(enabled = totalSelectedInList > 0 || state.selectedPackageNames.isNotEmpty()) {
+                                            onDeselectAllVisible()
+                                        }
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Deselect,
+                                            contentDescription = "Deselect All",
+                                            tint = if (totalSelectedInList > 0 || state.selectedPackageNames.isNotEmpty()) {
+                                                CriticalRed
+                                            } else {
+                                                TextMuted
+                                            },
+                                            modifier = Modifier.size(15.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            text = "Deselect All",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = if (totalSelectedInList > 0 || state.selectedPackageNames.isNotEmpty()) {
+                                                CriticalRed
+                                            } else {
+                                                TextMuted
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // Informative Critical Apps Protection badge if essential apps in view
+                        val criticalCountInList = filteredPackages.count { it.safetyLevel == SafetyLevel.ESSENTIAL }
+                        if (criticalCountInList > 0) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(Color(0xFF0F172A))
+                                    .padding(horizontal = 8.dp, vertical = 5.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Lock,
+                                    contentDescription = null,
+                                    tint = TextMuted,
+                                    modifier = Modifier.size(12.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "$criticalCountInList critical system component(s) locked & protected from bulk actions",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontSize = 10.sp,
+                                    color = TextMuted
+                                )
+                            }
+                        }
+                    }
+                }
             }
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(10.dp))
         }
 
         // Empty State
